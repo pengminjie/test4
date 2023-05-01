@@ -1,0 +1,354 @@
+一、HBase安装
+1.安装jdk、hadoop、zookeeper，使用三台虚拟机安装HBase集群
+2.下载安装包（注意hbase与hadoop的版本兼容）
+https://dlcdn.apache.org/hbase/
+3.上传到/export/software/并解压安装包到/export/servers
+tar -zxvf hbase-2.4.17-bin.tar.gz -C /export/servers
+4.修改配置文件hbase-env.sh、hbase-site.xml、regionservers,路径在HBase解压路径的conf目录下。
+（1）vi hbase-env.sh
+export JAVA_HOME=/export/servers/jdk
+export HBASE_MANAGES_ZK=false
+HBASE_MANAGES_ZK=false
+
+（2）vi hbase-site.xml
+<configuration>
+
+              <!-- HBase数据目录位置，其中hadoop1是Hadoopmaster机器的机器名-->
+        <property>
+                <name>hbase.rootdir</name>
+                <value>hdfs://hadoop1:9000/HBase</value>
+        </property>
+        <!-- 指定hbase是否分布式运行 -->
+        <property>
+                <name>hbase.cluster.distributed</name>
+                <value>true</value>
+        </property>
+        <!-- 默认HMaster HTTP访问端口 -->
+        <property>
+                <name>hbase.master.info.port</name>
+  	<value>16010</value>
+        </property>
+        <!-- 默认HRegionServer HTTP访问端口 -->
+        <property>
+                <name>hbase.regionserver.info.port</name>
+  	<value>16030</value>
+        </property>
+        <!-- 指定zookeeper的地址，多个用“,”分割 -->
+        <property>
+                <name>hbase.zookeeper.quorum</name>
+                <value>hadoop1,hadoop2,hadoop3</value>
+        </property>
+        <property>
+               <name>hbase.unsafe.stream.capability.enforce</name>
+               <value>false</value>
+        </property>
+</configuration>
+  
+
+（3）vi regionservers
+hadoop1
+hadoop2
+hadoop3
+5.配置系统变量，在/etc/profile文件加入：
+export HBASE_HOME=/export/servers/hbase-2.4.17
+export PATH=$PATH:$HBASE_HOME/bin
+6.系统变量生效 source /etc/profile
+hbase version
+7.复制安装文件到其他两个机器
+scp -r /export/servers/hbase-2.4.17/ root@hadoop3:/export/servers
+scp -r /export/servers/hbase-2.4.17/ root@hadoop2:/export/servers
+8.启动HBase,在hadoop1上start-hbase.sh
+    1.2.3    ./hadoop-daemon.sh start datanode
+    1.2.3    ./hadoop-daemon.sh start namenode
+    1.2.3    ./hadoop-daemon.sh start journalnode
+    1.2.3    yarn-daemon.sh start resourcemanager
+    1.2.3    yarn-daemon.sh start nodemanager
+     2        hadoop-daemon.sh start secondarynamenode
+     1       sbin/start-dfs.sh
+     1       sbin/start-yarn.sh
+zkServer.sh start
+zkServer.sh status
+（必须先启动hadoop和zookeeper）
+9.查看是否启动成功。jps
+10.在浏览器输入hadoop1:16010/
+
+二、用Hadoop提供的HBase Shell命令完成数据管理任务
+./hbase shell
+1.显示HBase中的表。
+list
+2.创建表user，包含info、data两个列族。
+create 'user','info','data'
+3.向表user中插入数据。
+put 'user','rk0001','info:name','zhangsan'
+put 'user','rk0001','info:gender','female'
+put 'user','rk0001','info:age',20
+put 'user','rk0001','data:pic','picture'
+4.获取user表中RowKey为rk0001的所有信息
+get 'user','rk0001'
+5.获取user表中RowKey为rk0001和info列族的所有信息
+get 'user','rk0001','info'
+6.获取user表中RowKey为rk0001和info列族的name、age列标识符的信息
+get 'user','rk0001','info:name','info:age'
+7.获取user表中RowKey为rk0001,info、data列族的信息
+get 'user','rk0001','info','data'
+get 'user','rk0001',{COLUMN=>['info','data']}
+get 'user','rk0001',{COLUMN=>['info:name','data:pic']}
+8.获取user表中RowKey为rk0001,列族为info、版本号最新3个的信息
+alter 'user',{NAME=>'info',VERSIONS=>3}
+9.向user表info:name列插入数据
+put 'user','rk0001','info:name','zhangsan1'
+10.查看user表info:name历史版本
+get 'user','rk0001',{COLUMN=>'info:name',VERSIONS=>3}
+11.获取user表中RowKey为rk0001、列标识符中含有a的信息
+get 'user','rk0001',{FILTER=>"(QualifierFilter(=,'substring:a'))"}
+12.利用scan命令查询user表中的所有信息。
+（1）查询user表中的所有信息。
+scan 'user'
+（2）查询user表中列族为info、列标识符为name的信息
+scan 'user',{COLUMN=>'info:name'}
+（3）查询user表中列族为info、RowKey范围为（rk0001,rk0003)的数据
+scan 'user',{COLUMN=>'info',STARTROW=>'rk0001',ENDROW=>'rk0003'}
+（4）查询user表中RowKey以rk字符开头的数据
+scan 'user',{FILTER=>"PrefixFilter('rk')"}
+（5）查询user表中指定时间范围的数据
+scan 'user',{TIMERANGE=>[1592536711273,1592536721505]}
+13.删除数据
+(1)删除user表中RowKey为rk0001、列标识符为info:name的数据
+delete  'user','rk0001','info:name'
+(2)清空user表数据
+truncate 'user'
+14.修改表结构
+（1)添加user表f1列族
+alter 'user',NAME=>'f1'
+（2)删除user表f1列族
+alter 'user','delete'=>'f1'
+（3)删除user表（先停用表）
+disable 'user'
+drop 'user'
+
+三、使用Hbase提供的Java API 完成一系列指定编程任务，实现应用程序对数据的管理及存取。
+1.
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.example</groupId>
+    <artifactId>hbase-api</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>8</maven.compiler.source>
+        <maven.compiler.target>8</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+    <!--单元测试依赖-->
+    <dependencies>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.12</version>
+        </dependency>
+        <!--HBase客户端依赖-->
+        <dependency>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-client</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+        <!--HBase核心依赖-->
+        <dependency>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-common</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>commons-logging</groupId>
+            <artifactId>commons-logging</artifactId>
+            <version>1.2</version>
+        </dependency>
+        <dependency>
+            <groupId>log4j</groupId>
+            <artifactId>log4j</artifactId>
+            <version>1.2.17</version>
+        </dependency>
+        </dependencies>
+</project>
+
+
+2.package com.hadoop.hbase;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.*;
+import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.junit.Before;
+import org.junit.Test;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+public class HbaseApiDemo{
+    private Configuration conf=null;
+    private Connection conn=null;
+    @Before
+    public void init() throws IOException{
+        //获取Configuration对象
+        conf =HBaseConfiguration.create();
+        //设置Zookeeper集群地址
+        conf.set("hbase.zookeeper.quorum", "hadoop1:2181,hadoop2:2181,hadoop3:2181");
+        //获取连接
+        conn = ConnectionFactory.createConnection(conf);
+    }
+    //创建表
+    @Test
+    public void CreateTable() throws Exception {
+        try{
+            //获取操作对象
+            Admin admin=conn.getAdmin();
+            //构建一个user表
+            TableDescriptorBuilder t_user = TableDescriptorBuilder.newBuilder(TableName.valueOf("t_user"));
+            //创建列族info
+            ColumnFamilyDescriptor of = ColumnFamilyDescriptorBuilder.of("info");
+            t_user.setColumnFamily(of);
+            //创建列族data
+            ColumnFamilyDescriptor of1 = ColumnFamilyDescriptorBuilder.of("data");
+            t_user.setColumnFamily(of1);
+            //构建
+            TableDescriptor build = t_user.build();
+            //创建表
+            admin.createTable(build);
+            // 关闭连接
+            admin.close();
+            conn.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+
+        }
+    }
+    //插入数据
+    @Test
+    public void testPut() throws Exception {
+        //创建table对象，通过table对象来添加数据
+        Table table = conn.getTable(TableName.valueOf("t_user"));
+        //创建一个集合，用于存放Put对象
+        ArrayList<Put> puts = new ArrayList<Put>();
+        //构建put对象（kv形式），并指定其行键
+        Put put01 = new Put(Bytes.toBytes("rk002"));
+        put01.addColumn(Bytes.toBytes("info"),
+                Bytes.toBytes("username"), Bytes.toBytes("zhangsan"));
+        put01.addColumn(Bytes.toBytes("info"),
+                Bytes.toBytes("password"), Bytes.toBytes("345678"));
+        Put put02 = new Put("rk003".getBytes());
+        put02.addColumn(Bytes.toBytes("info"),
+                Bytes.toBytes("username"), Bytes.toBytes("lisi"));
+        //把所有的put对象添加到一个集合中
+        puts.add(put01);
+        puts.add(put02);
+        //提交所有的插入数据的记录
+        table.put(puts);
+        //关闭
+        table.close();
+        conn.close();
+    }
+    //查询表
+    @Test
+    public void testGet() throws IOException {
+
+        Table table = conn.getTable(TableName.valueOf("t_user"));
+        //得到用于扫描region的对象
+        Get get = new Get("rk002".getBytes());
+        //使用HTable得到resultcanner实现类的对象
+        Result result1 = table.get(get);
+        List<Cell> cells = result1.listCells();
+        for (Cell cell : cells) {
+            //得到rowkey
+            System.out.println("行键:" + Bytes.toString(CellUtil.cloneRow(cell)));
+            //得到列族
+            System.out.println("列族:" + Bytes.toString(CellUtil.cloneFamily(cell)));
+            System.out.println("列:" + Bytes.toString(CellUtil.cloneQualifier(cell)));
+            System.out.println("值:" + Bytes.toString(CellUtil.cloneValue(cell)));
+        }
+    }
+    @Test
+    public void testScan() throws Exception {
+        //获取table对象
+        Table table = conn.getTable(TableName.valueOf("t_user"));
+        //获取scan对象
+        Scan scan = new Scan();
+        //获取查询的数据
+        ResultScanner scanner = table.getScanner(scan);
+        //获取ResultScanner所有数据，返回迭代器
+        Iterator<Result> iter = scanner.iterator();
+        //遍历迭代器
+        while (iter.hasNext()) {
+            //获取当前每一行结果数据
+            Result result = iter.next();
+            //获取当前每一行中所有的cell对象
+            List<Cell> cells = result.listCells();
+            //迭代所有的cell
+            for(Cell c:cells){
+                //获取行键
+                byte[] rowArray = c.getRowArray();
+                //获取列族
+                byte[] familyArray = c.getFamilyArray();
+                //获取列族下的列名称
+                byte[] qualifierArray = c.getQualifierArray();
+                //列字段的值
+                byte[] valueArray = c.getValueArray();
+                //打印rowArray、familyArray、qualifierArray、valueArray
+                System.out.println("行键:"+new String(rowArray, c.getRowOffset(),
+                        c.getRowLength()));
+                System.out.print("列族:"+new String(familyArray,c.getFamilyOffset(),
+                        c.getFamilyLength()));
+                System.out.print(" "+"列:"+ new String(qualifierArray,
+                        c.getQualifierOffset(), c.getQualifierLength()));
+                System.out.println(" "+"值:"+ new String(valueArray,
+                        c.getValueOffset(), c.getValueLength()));
+            }
+            System.out.println("-----------------------");
+        }
+        //关闭
+        table.close();
+        conn.close();
+    }
+    //删除表记录
+    @Test
+    public void testDel() throws Exception {
+        //获取table对象
+        Table table = conn.getTable(TableName.valueOf("t_user"));
+        //获取delete对象,需要一个rowkey
+        Delete delete = new Delete("rk002".getBytes());
+        //在delete对象中指定要删除的列族-列名称
+        delete.addColumn("info".getBytes(), "password".getBytes());
+        //执行删除操作
+        table.delete(delete);
+        //关闭
+        table.close();
+        conn.close();
+    }
+
+    //删除表
+    @Test
+    public void testDrop() throws Exception {
+        //获取一个表的管理器
+        Admin admin = conn.getAdmin();
+        //删除表时先需要禁用表
+        admin.disableTable(TableName.valueOf("t_user"));
+        admin.deleteTable(TableName.valueOf("t_user"));
+        //关闭
+        admin.close();
+        conn.close();
+    }
+
+}
+
+log4j.properties
+
+log4j.rootLogger=INFO, stdout
+log4j.appender.stdout=org.apache.log4j.ConsoleAppender
+log4j.appender.stdout.layout=org.apache.log4j.PatternLayout
+log4j.appender.stdout.layout.ConversionPattern=%d %p [%c] - %m%n
+log4j.appender.logfile=org.apache.log4j.FileAppender
+log4j.appender.logfile.File=target/spring.log
+log4j.appender.logfile.layout=org.apache.log4j.PatternLayout
+log4j.appender.logfile.layout.ConversionPattern=%d %p [%c] - %m%n
