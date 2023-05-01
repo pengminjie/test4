@@ -1,0 +1,225 @@
+查看mysql是否安装，如果安装了，卸载mysql
+（1）查看
+rpm -qa|grep mysql
+mysql-libs-5.1.73-7.el6.x86_64
+（2）卸载
+rpm -e --nodeps mysql-libs-5.1.73-7.el6.x86_64
+
+
+1.Hive安装及建表，查询，导入数据等操作
+   1.1安装MySQL
+(1)下载MySQL的yum源：
+wget http://dev.mysql.com/get/mysql57-community-release-el7-7.noarch.rpm
+(2)查看下载源中包含的rpm包：
+rpm -Uvh mysql57-community-release-el7-7.noarch.rpm
+rpm -qpl mysql57-community-release-el7-7.noarch.rpm    (x)
+(3)安装MySQL:
+yum install -y mysql-community-server
+
+
+查看是否安装成功：
+yum repolist enabled | grep "mysql.*-community.*"
+
+(4)启动mysql服务
+systemctl start mysqld.service
+systemctl status mysqld
+(5)查找MySQL初始密码
+grep “ password” /var/log/mysqld.log      x
+grep 'temporary password' /var/log/mysqld.log
+
+(6)登录MySQL:
+mysql -uroot -p
+(7)设置安全级别
+set global validate_password_policy=0;
+(8)设置密码长度
+set global validate_password_length=4;
+(9)设置密码
+set password=password('1234');
+(10)创建数据库
+create database hive;
+(11)创建MySQL用户，名称为hadoop，设置用户密码
+grant all on *.* to hadoop@'%' identified by 'hadoop';
+grant all on *.* to hadoop@'localhost' identified by 'hadoop';
+grant all on *.* to hadoop@'hadoop2' identified by 'hadoop';
+flush privileges;
+     
+
+1.2安装Hive
+(1)下载安装包，将安装包上传到服务器，并进行解压
+cd /export/software
+上传安装包
+tar -zxvf apache-hive-3.1.2-bin.tar.gz -C /export/servers
+(mv apache-hive-3.1.2-bin hive)
+
+(2)配置Hive环境变量
+vi /etc/profile
+export HIVE_HOME=/export/servers/hive/
+export PATH=$HIVE_HOME/bin:$PATH
+配置完成并保存后，刷新配置文件，source /etc/profile
+hive --version
+
+(3)在Hadoop下创建文件夹hive
+hadoop fs -mkdir -p /hive/tmp
+hadoop fs -mkdir -p /hive/warehouse
+hadoop fs -chmod g+w /hive/tmp
+hadoop fs -chmod g+w /hive/warehouse
+hadoop fs -chmod -R 777 /user/hive/tmp
+(4)修改Hive配置文件
+cd /export/servers/hive/conf/
+cp hive-env.sh.template  hive-env.sh
+cp hive-default.xml.template hive-site.xml
+cp hive-log4j2.properties.template hive-log4j2.properties
+cp hive-exec-log4j2.properties.template hive-exec-log4j2.properties
+
+vi hive-env.sh修改配置文件
+export JAVA_HOME=/export/servers/jdk
+export HADOOP_HOME=/export/servers/hadoop-3.1.3
+
+
+
+添加hive-site.xml配置文件，配置MySQL相关信息
+<configuration>
+	<property>
+		<name>hive.exec.scratchdir</name>
+		<value>/hive/tmp</value>
+	</property>
+	<property>
+		<name>hive.metastore.warehouse.dir</name>
+		<value>/hive/warehouse</value>
+	</property>
+	<property>
+		<name>hive.querylog.location</name>
+		<value>/hive/log</value>
+	</property>
+	<!-- 配置MySQL数据库连接信息-->
+	<property>
+		<name>javax.jdo.option.ConnectionURL</name>
+		<value>jdbc:mysql://localhost:3306/metastore?createDatabaseIfNotExist=true&amp;characterEncoding=UTF-8&amp;useSSL=false</value>
+	</property>
+	<property>
+		<name>javax.jdo.option.ConnectionDriverName</name>
+		<value>com.mysql.jdbc.Driver</value>
+	</property>
+	<property>
+		<name>javax.jdo.option.ConnectionUserName</name>
+		<value>hadoop</value>
+	</property>
+	<property>
+		<name>javax.jdo.option.ConnectionPassword</name>
+		<value>hadoop</value>
+	</property>
+</configuration>
+
+(5)初始化Hive
+./schematool -dbType mysql -initSchema 
+(6)下载mysql-connector-java-5.1.46.jar,并复制到Hive安装目录的lib目录下。
+(7)启动Hive
+/export/servers/hive/tmp
+
+
+
+
+Hive基础SQL语言
+
+一、DDL操作：数据定义语言
+1.创建数据库create database bigdata;
+显示数据库show databases;
+使用数据库use bigdata;
+2.创建表
+(1)创建内部表
+create table if not exists student(
+     id int,
+    name string,
+    birthday timestamp)
+    row format delimited
+    fields terminated by '\t'            
+    lines terminated by '\n'            
+    stored as textfile
+    location '/hive/warehouse/ student';
+查看当前数据库中表show tables;
+查看数据库中的表 show tables in bigdata；
+查看数据表的结构信息desc student;
+通过复制另一张表的表结构来创建表
+create table if not exists student_copy like student;
+
+(2)创建外部表，名为student_external
+create external table if not exists student_external(
+     id int,
+    name string,
+    birthday timestamp)
+    row format delimited
+    fields terminated by '\t'            
+    lines terminated by '\n'            
+    stored as textfile
+    location '/hive/warehouse/external';
+
+(3)创建分区表,名为teacher_partition
+create table teacher_partition(
+     id string,
+    name string)
+    partitioned by(country string,state string);
+    
+set hive.exec.dynamic.partition=true; 
+set hive.exec.dynamic.partition.mode=nonstrict;
+set hive.exec.max.dynamic.partitions.pernode=1000;
+
+(4)创建桶表teacher_bucket
+create table teacher_bucket(
+    id string,
+    name string,
+    country string,
+    state string)
+    clustered by(id) into 4 buckets;
+
+show tables;
+
+3.修改表 alter table
+（1）对表重命名
+alter table student_copy rename to student01;
+（2）修改列信息
+alter table student01
+change column id uid int;
+（3）修改字段的类型
+alter table student01
+change column uid uid string;
+（4）增加列
+alter table student01 add columns(grade string,class string);
+（5）删除或替换列
+alter table student01 replace columns(grade string,class string);
+（6）删除表
+drop table student01;
+
+二、DML操作：数据操作语言
+1.装载数据
+（1）从本地路径下一次性装大量的数据的方式。以内部表teacher为例。
+create table teacher1(id int,name string,country string,state string)
+    row format delimited fields terminated by '\t'  
+    null defined as ' '               
+    stored as textfile
+    location '/hive/warehouse/ teacher1';
+
+load data local inpath '/data.txt' into table teacher1;
+单个空格改为tab缩进
+（2）覆盖表中已有的记录。
+load data local inpath '/data.txt'  overwrite into table teacher1;
+（3）装载分区表数据.
+load data local inpath '/data.txt'  overwrite into table teacher_partition partition(country='US',state='CA');
+2.插入数据
+（1）标准SQL插入数据
+set hive.exec.mode.local.auto=true；
+
+insert into teacher1(id,name,country,state) values(5,'aliy','CA','BD');
+（2）通过查询语句向表中插入数据
+create table teacher01(id int,name string,country string,state string)
+    row format delimited fields terminated by '\t'  
+    null defined as ' '               
+    stored as textfile
+    location '/hive/warehouse/ teacher01';
+insert into teacher01 select * from teacher1;
+（3）导出数据
+insert overwrite local directory '/data' select * from teacher1;
+（4）删除、更新数据
+truncate table teacher1;
+
+三、DQL操作:数据查询语言
+select country,count(*) from teacher1 group by country having count(*)>1;
